@@ -1,0 +1,1258 @@
+---
+title: "Summarised_trayscan_inhibitor"
+author: "Hanh"
+date: "9/18/2020"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r set up, message=FALSE, warning=FALSE}
+#load library
+library(tidyverse)
+library(janitor)
+library(reshape2)
+library(lme4)
+library(lmerTest)
+library(emmeans)
+library(piecewiseSEM)
+library(beeswarm)
+library(plyr)
+library(tidyr)
+#function calculation for psii, no, npq
+phi_psii_calc <- function(Ft, fm){1 - (Ft/fm)}
+phi_npq_calc <- function(Ft, fm, Fm_0){(Ft/fm)-(Ft/Fm_0)}
+phi_no_calc <- function(Ft, Fm_0){Ft/Fm_0}
+fvfm_calc = function(Fm, Fo) {(Fm-Fo)/Fm}
+#light intensity for actinic light
+light = 700
+#what to keep in the data
+keep <- c('Fm','Ft','QY')
+```
+
+##Firstly, load and prepare the first batch in :)
+```{r}
+#load data
+a0 <- read_delim("C:/Users/HP/OneDrive - Australian National University/uni/Honours/aims/2_experiment/trayscan/20200918_totalrealinhibitor/0min_1.TXT", delim='\t', skip=2) %>%  
+  clean_names() %>% #clean space and special characters for easier data handling
+  gather(key, value, -x1, na.rm=T) %>% #change a wide dataframe to a long one
+  mutate(measure = sapply(strsplit(x1, split = '_'), FUN = function(l) l[1])) %>% #take away anything after "_" in x1 if available into measure col
+  mutate(time_key = sapply(strsplit(x1, split = '_'), FUN = function(l) l[2])) %>% #put anything after "_" in x1 into time_key
+  filter(measure %in% keep) #filter everything out except Fm, Ft and QY
+
+a10 <- read_delim("C:/Users/HP/OneDrive - Australian National University/uni/Honours/aims/2_experiment/trayscan/20200918_totalrealinhibitor/10min_1.TXT", delim='\t', skip=2) %>%  
+  clean_names() %>% #clean space and special characters for easier data handling
+  gather(key, value, -x1, na.rm=T) %>% #change a wide dataframe to a long one
+  mutate(measure = sapply(strsplit(x1, split = '_'), FUN = function(l) l[1])) %>% #take away anything after "_" in x1 if available into measure col
+  mutate(time_key = sapply(strsplit(x1, split = '_'), FUN = function(l) l[2])) %>% #put anything after "_" in x1 into time_key
+  filter(measure %in% keep) #filter everything out except Fm, Ft and QY
+
+a30 <- read_delim("C:/Users/HP/OneDrive - Australian National University/uni/Honours/aims/2_experiment/trayscan/20200918_totalrealinhibitor/30min_1.TXT", delim='\t', skip=2) %>%  
+  clean_names() %>% #clean space and special characters for easier data handling
+  gather(key, value, -x1, na.rm=T) %>% #change a wide dataframe to a long one
+  mutate(measure = sapply(strsplit(x1, split = '_'), FUN = function(l) l[1])) %>% #take away anything after "_" in x1 if available into measure col
+  mutate(time_key = sapply(strsplit(x1, split = '_'), FUN = function(l) l[2])) %>% #put anything after "_" in x1 into time_key
+  filter(measure %in% keep) #filter everything out except Fm, Ft and QY
+
+a60 <- read_delim("C:/Users/HP/OneDrive - Australian National University/uni/Honours/aims/2_experiment/trayscan/20200918_totalrealinhibitor/60min_1.TXT", delim='\t', skip=2) %>%  
+  clean_names() %>% #clean space and special characters for easier data handling
+  gather(key, value, -x1, na.rm=T) %>% #change a wide dataframe to a long one
+  mutate(measure = sapply(strsplit(x1, split = '_'), FUN = function(l) l[1])) %>% #take away anything after "_" in x1 if available into measure col
+  mutate(time_key = sapply(strsplit(x1, split = '_'), FUN = function(l) l[2])) %>% #put anything after "_" in x1 into time_key
+  filter(measure %in% keep) #filter everything out except Fm, Ft and QY
+```
+
+```{r}
+# convert labels to timepoints. Same time point for all of them, so use a0 as example
+timepoints <- tbl_df(unique(a0$time_key)) %>% #create a table for timepoints. There is the max thing for QY
+  mutate(time = c(0,20,40,60,80,100,120,150,180,240,300,360,420,480,540,600,630,660,720,840,0)) #match the timepoint wtih actual time in seconds
+  
+```
+
+```{r}
+## reformat df to make re-calculation
+dat0 <- mutate(a0, time = timepoints$time[match(a0$time_key, timepoints$value)]) %>% #shove the time just created to data
+  select(x1, measure, time, key, value) %>% #select what you need in your data in the order you want
+  dcast(formula = time + key ~ measure) %>% #match the value to the correct measure (Ft, Fm qY)
+  mutate(Ft = ifelse(is.na(Ft) == T, yes = 0, no = Ft)) #ifelse return yes/no. so if Ft contain na is true, yes replace w 0. if not, left alone
+
+dat10 <- mutate(a10, time = timepoints$time[match(a10$time_key, timepoints$value)]) %>% #shove the time just created to data
+  select(x1, measure, time, key, value) %>% #select what you need in your data in the order you want
+  dcast(formula = time + key ~ measure) %>% #match the value to the correct measure (Ft, Fm qY)
+  mutate(Ft = ifelse(is.na(Ft) == T, yes = 0, no = Ft)) #ifelse return yes/no. so if Ft contain na is true, yes replace w 0. if not, left alone
+
+
+dat30 <- mutate(a30, time = timepoints$time[match(a30$time_key, timepoints$value)]) %>% #shove the time just created to data
+  select(x1, measure, time, key, value) %>% #select what you need in your data in the order you want
+  dcast(formula = time + key ~ measure) %>% #match the value to the correct measure (Ft, Fm qY)
+  mutate(Ft = ifelse(is.na(Ft) == T, yes = 0, no = Ft)) #ifelse return yes/no. so if Ft contain na is true, yes replace w 0. if not, left alone
+
+dat60 <- mutate(a60, time = timepoints$time[match(a60$time_key, timepoints$value)]) %>% #shove the time just created to data
+  select(x1, measure, time, key, value) %>% #select what you need in your data in the order you want
+  dcast(formula = time + key ~ measure) %>% #match the value to the correct measure (Ft, Fm qY)
+  mutate(Ft = ifelse(is.na(Ft) == T, yes = 0, no = Ft)) #ifelse return yes/no. so if Ft contain na is true, yes replace w 0. if not, left alone
+
+### Fv/Fm max (i.e. dark-adapted)
+###
+dat_fvfm0 <- select(dat0, time, key, QY) %>% subset(time == 0) %>% # take out the one at time 0
+  gather(key = var, value, QY) #set Qy as a separate variable, and the Qy value as a different thing!
+
+dat_fvfm10 <- select(dat10, time, key, QY) %>% subset(time == 0) %>% # take out the one at time 0
+  gather(key = var, value, QY) #set Qy as a separate variable, and the Qy value as a different thing!
+
+dat_fvfm30 <- select(dat30, time, key, QY) %>% subset(time == 0) %>% # take out the one at time 0
+  gather(key = var, value, QY) #set Qy as a separate variable, and the Qy value as a different thing!
+
+dat_fvfm60 <- select(dat60, time, key, QY) %>% subset(time == 0) %>% # take out the one at time 0
+  gather(key = var, value, QY) #set Qy as a separate variable, and the Qy value as a different thing!
+```
+
+```{r}
+#cal phi for time 0
+
+  ## t_0 values
+  t_0 <- select(dat0, time, key, Fm, Ft) %>% subset(time == 0)
+  
+  ## add Fm_0 to df
+  dat_phi <- select(dat0, time, key, Fm, Ft) %>%
+    mutate(Fm_0 = t_0$Fm[match(key, t_0$key)]) #Fm at time 0
+  
+  ## calculate phi traits
+  psii <- as.matrix(mapply(phi_psii_calc, dat_phi$Ft, dat_phi$Fm))
+  no <- as.matrix(mapply(phi_no_calc, dat_phi$Ft, dat_phi$Fm_0))
+  npq <- as.matrix(mapply(phi_npq_calc, dat_phi$Ft, dat_phi$Fm, dat_phi$Fm_0))
+  ## reassemble df
+  df0 <- select(dat_phi, -Fm,-Ft, -Fm_0) %>% #remove Fm, Ft, Fm_0. Then start to add phi stuff in, as well as the time
+    mutate(psii = as.numeric(psii)) %>%
+    mutate(no = as.numeric(no)) %>%
+    mutate(npq = as.numeric(npq)) %>%
+    mutate(time = factor(time)) %>%
+    gather(key = var, value, psii, no, npq) %>% #var = the phi, and the value becomes value
+    rbind(dat_fvfm0) %>%
+    mutate(area_no = sapply(strsplit(key, split = '_'), FUN = function(l) l[2])) #take away anything after "_" in key if available into measure col
+
+#cal phi for time 10
+  ## t_0 values
+  t_0 <- select(dat10, time, key, Fm, Ft) %>% subset(time == 0)
+  ## add Fm_0 to df
+  dat_phi <- select(dat10, time, key, Fm, Ft) %>%
+    mutate(Fm_0 = t_0$Fm[match(key, t_0$key)]) #Fm at time 0
+  
+  ## calculate phi traits
+  psii <- as.matrix(mapply(phi_psii_calc, dat_phi$Ft, dat_phi$Fm))
+  no <- as.matrix(mapply(phi_no_calc, dat_phi$Ft, dat_phi$Fm_0))
+  npq <- as.matrix(mapply(phi_npq_calc, dat_phi$Ft, dat_phi$Fm, dat_phi$Fm_0))
+  ## reassemble df
+  df10 <- select(dat_phi, -Fm, -Ft, -Fm_0) %>% #remove Fm, Ft, Fm_0. Then start to add phi stuff in, as well as the time
+    mutate(psii = as.numeric(psii)) %>%
+    mutate(no = as.numeric(no)) %>%
+    mutate(npq = as.numeric(npq)) %>%
+    mutate(time = factor(time)) %>%
+    gather(key = var, value, psii, no, npq) %>% #var = the phi, and the value becomes value
+    rbind(dat_fvfm10) %>%
+    mutate(area_no = sapply(strsplit(key, split = '_'), FUN = function(l) l[2])) #take away anything after "_" in key if available into measure col
+
+#cal phi for time 30
+  ## t_0 values
+  t_0 <- select(dat30, time, key, Fm, Ft) %>% subset(time == 0)
+  ## add Fm_0 to df
+  dat_phi <- select(dat30, time, key, Fm, Ft) %>%
+    mutate(Fm_0 = t_0$Fm[match(key, t_0$key)]) #Fm at time 0
+  
+  ## calculate phi traits
+  psii <- as.matrix(mapply(phi_psii_calc, dat_phi$Ft, dat_phi$Fm))
+  no <- as.matrix(mapply(phi_no_calc, dat_phi$Ft, dat_phi$Fm_0))
+  npq <- as.matrix(mapply(phi_npq_calc, dat_phi$Ft, dat_phi$Fm, dat_phi$Fm_0))
+  ## reassemble df
+  df30 <- select(dat_phi, -Fm, -Ft, -Fm_0) %>% #remove Fm, Ft, Fm_0. Then start to add phi stuff in, as well as the time
+    mutate(psii = as.numeric(psii)) %>%
+    mutate(no = as.numeric(no)) %>%
+    mutate(npq = as.numeric(npq)) %>%
+    mutate(time = factor(time)) %>%
+    gather(key = var, value, psii, no, npq) %>% #var = the phi, and the value becomes value
+    rbind(dat_fvfm30) %>%
+    mutate(area_no = sapply(strsplit(key, split = '_'), FUN = function(l) l[2])) #take away anything after "_" in key if available into measure col
+
+
+#cal phi for time 60
+  ## t_0 values
+  t_0 <- select(dat60, time, key, Fm, Ft) %>% subset(time == 0)
+  ## add Fm_0 to df
+  dat_phi <- select(dat60, time, key, Fm, Ft) %>%
+    mutate(Fm_0 = t_0$Fm[match(key, t_0$key)]) #Fm at time 0
+  
+  ## calculate phi traits
+  psii <- as.matrix(mapply(phi_psii_calc, dat_phi$Ft, dat_phi$Fm))
+  no <- as.matrix(mapply(phi_no_calc, dat_phi$Ft, dat_phi$Fm_0))
+  npq <- as.matrix(mapply(phi_npq_calc, dat_phi$Ft, dat_phi$Fm, dat_phi$Fm_0))
+  ## reassemble df
+  df60 <- select(dat_phi, -Fm, -Ft, -Fm_0) %>% #remove Fm, Ft, Fm_0. Then start to add phi stuff in, as well as the time
+    mutate(psii = as.numeric(psii)) %>%
+    mutate(no = as.numeric(no)) %>%
+    mutate(npq = as.numeric(npq)) %>%
+    mutate(time = factor(time)) %>%
+    gather(key = var, value, psii, no, npq) %>% #var = the phi, and the value becomes value
+    rbind(dat_fvfm60) %>%
+    mutate(area_no = sapply(strsplit(key, split = '_'), FUN = function(l) l[2])) #take away anything after "_" in key if available into measure col
+
+#force to be numeric for area_no
+df0$area_no = as.numeric(df0$area_no)
+df10$area_no = as.numeric(df10$area_no)
+df30$area_no = as.numeric(df30$area_no)
+df60$area_no = as.numeric(df60$area_no)
+
+#extract into HL and LL dataset
+HL = as.numeric(c(1,2,6,7,9,12,14,15,16, 17, 19, 20))
+df10_HL = df10 %>% filter(area_no %in%HL)
+df10_HL$condition = "HL"
+
+df30_HL = df30 %>% filter(area_no %in%HL)
+df30_HL$condition = "HL"
+
+df60_HL = df60 %>% filter(area_no %in%HL)
+df60_HL$condition = "HL"
+
+
+LL = as.numeric(c(3,4,5,8,10,11,13,18))
+df0_LL = df0
+df0_LL$condition = "LL"
+df0_LL$treatment = ifelse(df0_LL$area_no == 1, 'control', 
+                  ifelse(df0_LL$area_no == 2, 'inhibitor',
+                         ifelse(df0_LL$area_no == 3, 'mock',
+                                ifelse(df0_LL$area_no == 4, 'mock',
+                                       ifelse(df0_LL$area_no ==5, 'control', 
+                                              ifelse(df0_LL$area_no ==6, 'mock',
+                                                     ifelse(df0_LL$area_no ==7, 'inhibitor', ifelse(df0_LL$area_no ==8, 'inhibitor', ifelse(df0_LL$area_no ==9, 'mock', ifelse(df0_LL$area_no ==10, 'control', ifelse(df0_LL$area_no ==11, 'control', 'inhibitor')))))))))))
+
+df10_LL = df10 %>% filter(area_no %in%LL)
+df10_LL$condition = "LL"
+
+df30_LL = df30 %>% filter(area_no %in%LL)
+df30_LL$condition = "LL"
+
+df60_LL = df60 %>% filter(area_no %in%LL)
+df60_LL$condition = "LL"
+
+df0_2 = df0_LL %>% mutate(batch = 1) %>% mutate(datatime = 0)
+df10_2 = rbind(df10_HL,df10_LL)
+df10_2$treatment = ifelse(df10_2$area_no == 1, 'control', ifelse(df10_2$area_no == 2, 'mock', ifelse(df10_2$area_no == 3, 'inhibitor',ifelse(df10_2$area_no == 4, 'mock', ifelse(df10_2$area_no ==5, 'mock', ifelse(df10_2$area_no ==6, 'inhibitor', ifelse(df10_2$area_no ==7, 'control', ifelse(df10_2$area_no ==8, 'inhibitor', ifelse(df10_2$area_no ==9, 'mock', ifelse(df10_2$area_no ==10, 'inhibitor', ifelse(df10_2$area_no ==11, 'mock', ifelse(df10_2$area_no ==12, 'inhibitor', ifelse(df10_2$area_no ==13, 'inhibitor', ifelse(df10_2$area_no ==14, 'control', ifelse(df10_2$area_no ==15, 'inhibitor', ifelse(df10_2$area_no ==16, 'mock', ifelse(df10_2$area_no ==17, 'inhibitor', ifelse(df10_2$area_no ==18, 'mock', ifelse(df10_2$area_no ==19, 'mock', 'control')))))))))))))))))))
+df10_2 = mutate(df10_2, batch = 1)%>% mutate(datatime = 10)
+df10_LLcontrol = subset(df0_2, treatment == "control") %>% mutate(datatime =10)
+df10_2 = rbind(df10_2,df10_LLcontrol) #0 min LL_control is LL_control for everything
+
+df30_2 = rbind(df30_HL,df30_LL)
+df30_2$treatment = ifelse(df30_2$area_no == 1, 'control', ifelse(df30_2$area_no == 2, 'mock', ifelse(df30_2$area_no == 3, 'inhibitor', ifelse(df30_2$area_no == 4, 'mock', ifelse(df30_2$area_no ==5, 'mock', ifelse(df30_2$area_no ==6, 'inhibitor', ifelse(df30_2$area_no ==7, 'control', ifelse(df30_2$area_no ==8, 'inhibitor', ifelse(df30_2$area_no ==9, 'mock', ifelse(df30_2$area_no ==10, 'inhibitor', ifelse(df30_2$area_no ==11, 'mock', ifelse(df30_2$area_no ==12, 'inhibitor', ifelse(df30_2$area_no ==13, 'inhibitor', ifelse(df30_2$area_no ==14, 'control', ifelse(df30_2$area_no ==15, 'inhibitor', ifelse(df30_2$area_no ==16, 'mock', ifelse(df30_2$area_no ==17, 'inhibitor', ifelse(df30_2$area_no ==18, 'mock', ifelse(df30_2$area_no ==19, 'mock', 'control')))))))))))))))))))
+df30_2 = mutate(df30_2, batch = 1)%>% mutate(datatime = 30)
+df30_LLcontrol = subset(df0_2, treatment == "control") %>% mutate(datatime =30)
+df30_2 = rbind(df30_2,df30_LLcontrol) #0 min LL_control is LL_control for everything
+
+
+df60_2 = rbind(df60_HL,df60_LL)
+df60_2$treatment = ifelse(df60_2$area_no == 1, 'control', ifelse(df60_2$area_no == 2, 'mock', ifelse(df60_2$area_no == 3, 'inhibitor', ifelse(df60_2$area_no == 4, 'mock', ifelse(df60_2$area_no ==5, 'mock', ifelse(df60_2$area_no ==6, 'inhibitor', ifelse(df60_2$area_no ==7, 'control', ifelse(df60_2$area_no ==8, 'inhibitor', ifelse(df60_2$area_no ==9, 'mock', ifelse(df60_2$area_no ==10, 'inhibitor', ifelse(df60_2$area_no ==11, 'mock', ifelse(df60_2$area_no ==12, 'inhibitor', ifelse(df60_2$area_no ==13, 'inhibitor', ifelse(df60_2$area_no ==14, 'control', ifelse(df60_2$area_no ==15, 'inhibitor', ifelse(df60_2$area_no ==16, 'mock', ifelse(df60_2$area_no ==17, 'inhibitor', ifelse(df60_2$area_no ==18, 'mock',ifelse(df60_2$area_no ==19, 'mock', 'control')))))))))))))))))))
+df60_2 = mutate(df60_2, batch = 1)%>% mutate(datatime = 60)
+df60_LLcontrol = subset(df0_2, treatment == "control") %>% 
+  mutate(datatime =60)
+df60_2 = rbind(df60_2,df60_LLcontrol) #0 min LL_control is LL_control for everything
+
+
+#force to be factor for time and area_no
+df0_2$time = as.factor(df0_2$time)
+df0_2$datatime = as.factor(df0_2$datatime)
+df0_2$area_no = as.factor(df0_2$area_no)
+df0_2$condition = as.factor(df0_2$condition)
+df0_2$treatment = as.factor(df0_2$treatment)
+df0_2$batch = as.factor(df0_2$batch)
+
+df10_2$time = as.factor(df10_2$time)
+df10_2$datatime = as.factor(df10_2$datatime)
+df10_2$area_no = as.factor(df10_2$area_no)
+df10_2$condition = factor(df10_2$condition,levels = c("LL", "HL"))
+df10_2$treatment = as.factor(df10_2$treatment)
+df10_2$batch = as.factor(df10_2$batch)
+
+df30_2$time = as.factor(df30_2$time)
+df30_2$datatime = as.factor(df30_2$datatime)
+df30_2$area_no = as.factor(df30_2$area_no)
+df30_2$condition = factor(df30_2$condition,levels = c("LL", "HL"))
+df30_2$treatment = as.factor(df30_2$treatment)
+df30_2$batch = as.factor(df30_2$batch)
+
+df60_2$time = as.factor(df60_2$time)
+df60_2$datatime = as.factor(df60_2$datatime)
+df60_2$area_no = as.factor(df60_2$area_no)
+df60_2$condition = factor(df60_2$condition,levels = c("LL", "HL"))
+df60_2$treatment = as.factor(df60_2$treatment)
+df60_2$batch = as.factor(df60_2$batch)
+
+data1 = rbind(df0_2, df10_2, df30_2, df60_2)
+
+QY0 = subset(df0_2, var == "QY")
+QY0$datatime = 0
+QY0HL = QY0
+QY0HL$condition = "HL"
+QY0 = rbind(QY0, QY0HL)
+QY0$condition = as.character(QY0$condition)
+QY10 = subset(df10_2, var == "QY")
+QY30 = subset(df30_2, var == "QY")
+QY60 = subset(df60_2, var == "QY")
+QYdata1 = rbind(QY0, QY10, QY30, QY60)
+```
+
+##Secondly, load and prepare the second batch in :)
+
+```{r}
+#load data
+a0 <- read_delim("C:/Users/HP/OneDrive - Australian National University/uni/Honours/aims/2_experiment/trayscan/20200918_totalrealinhibitor/0min_2.TXT", delim='\t', skip=2) %>%  
+  clean_names() %>% #clean space and special characters for easier data handling
+  gather(key, value, -x1, na.rm=T) %>% #change a wide dataframe to a long one
+  mutate(measure = sapply(strsplit(x1, split = '_'), FUN = function(l) l[1])) %>% #take away anything after "_" in x1 if available into measure col
+  mutate(time_key = sapply(strsplit(x1, split = '_'), FUN = function(l) l[2])) %>% #put anything after "_" in x1 into time_key
+  filter(measure %in% keep) #filter everything out except Fm, Ft and QY
+
+a10 <- read_delim("C:/Users/HP/OneDrive - Australian National University/uni/Honours/aims/2_experiment/trayscan/20200918_totalrealinhibitor/10min_2.TXT", delim='\t', skip=2) %>%  
+  clean_names() %>% #clean space and special characters for easier data handling
+  gather(key, value, -x1, na.rm=T) %>% #change a wide dataframe to a long one
+  mutate(measure = sapply(strsplit(x1, split = '_'), FUN = function(l) l[1])) %>% #take away anything after "_" in x1 if available into measure col
+  mutate(time_key = sapply(strsplit(x1, split = '_'), FUN = function(l) l[2])) %>% #put anything after "_" in x1 into time_key
+  filter(measure %in% keep) #filter everything out except Fm, Ft and QY
+
+a30 <- read_delim("C:/Users/HP/OneDrive - Australian National University/uni/Honours/aims/2_experiment/trayscan/20200918_totalrealinhibitor/30min_2.TXT", delim='\t', skip=2) %>%  
+  clean_names() %>% #clean space and special characters for easier data handling
+  gather(key, value, -x1, na.rm=T) %>% #change a wide dataframe to a long one
+  mutate(measure = sapply(strsplit(x1, split = '_'), FUN = function(l) l[1])) %>% #take away anything after "_" in x1 if available into measure col
+  mutate(time_key = sapply(strsplit(x1, split = '_'), FUN = function(l) l[2])) %>% #put anything after "_" in x1 into time_key
+  filter(measure %in% keep) #filter everything out except Fm, Ft and QY
+
+a60 <- read_delim("C:/Users/HP/OneDrive - Australian National University/uni/Honours/aims/2_experiment/trayscan/20200918_totalrealinhibitor/60min_2.TXT", delim='\t', skip=2) %>%  
+  clean_names() %>% #clean space and special characters for easier data handling
+  gather(key, value, -x1, na.rm=T) %>% #change a wide dataframe to a long one
+  mutate(measure = sapply(strsplit(x1, split = '_'), FUN = function(l) l[1])) %>% #take away anything after "_" in x1 if available into measure col
+  mutate(time_key = sapply(strsplit(x1, split = '_'), FUN = function(l) l[2])) %>% #put anything after "_" in x1 into time_key
+  filter(measure %in% keep) #filter everything out except Fm, Ft and QY
+```
+
+```{r}
+## reformat df to make re-calculation
+dat0 <- mutate(a0, time = timepoints$time[match(a0$time_key, timepoints$value)]) %>% #shove the time just created to data
+  select(x1, measure, time, key, value) %>% #select what you need in your data in the order you want
+  dcast(formula = time + key ~ measure) %>% #match the value to the correct measure (Ft, Fm qY)
+  mutate(Ft = ifelse(is.na(Ft) == T, yes = 0, no = Ft)) #ifelse return yes/no. so if Ft contain na is true, yes replace w 0. if not, left alone
+
+dat10 <- mutate(a10, time = timepoints$time[match(a10$time_key, timepoints$value)]) %>% #shove the time just created to data
+  select(x1, measure, time, key, value) %>% #select what you need in your data in the order you want
+  dcast(formula = time + key ~ measure) %>% #match the value to the correct measure (Ft, Fm qY)
+  mutate(Ft = ifelse(is.na(Ft) == T, yes = 0, no = Ft)) #ifelse return yes/no. so if Ft contain na is true, yes replace w 0. if not, left alone
+
+
+dat30 <- mutate(a30, time = timepoints$time[match(a30$time_key, timepoints$value)]) %>% #shove the time just created to data
+  select(x1, measure, time, key, value) %>% #select what you need in your data in the order you want
+  dcast(formula = time + key ~ measure) %>% #match the value to the correct measure (Ft, Fm qY)
+  mutate(Ft = ifelse(is.na(Ft) == T, yes = 0, no = Ft)) #ifelse return yes/no. so if Ft contain na is true, yes replace w 0. if not, left alone
+
+dat60 <- mutate(a60, time = timepoints$time[match(a60$time_key, timepoints$value)]) %>% #shove the time just created to data
+  select(x1, measure, time, key, value) %>% #select what you need in your data in the order you want
+  dcast(formula = time + key ~ measure) %>% #match the value to the correct measure (Ft, Fm qY)
+  mutate(Ft = ifelse(is.na(Ft) == T, yes = 0, no = Ft)) #ifelse return yes/no. so if Ft contain na is true, yes replace w 0. if not, left alone
+
+### Fv/Fm max (i.e. dark-adapted)
+###
+dat_fvfm0 <- select(dat0, time, key, QY) %>% subset(time == 0) %>% # take out the one at time 0
+  gather(key = var, value, QY) #set Qy as a separate variable, and the Qy value as a different thing!
+
+dat_fvfm10 <- select(dat10, time, key, QY) %>% subset(time == 0) %>% # take out the one at time 0
+  gather(key = var, value, QY) #set Qy as a separate variable, and the Qy value as a different thing!
+
+dat_fvfm30 <- select(dat30, time, key, QY) %>% subset(time == 0) %>% # take out the one at time 0
+  gather(key = var, value, QY) #set Qy as a separate variable, and the Qy value as a different thing!
+
+dat_fvfm60 <- select(dat60, time, key, QY) %>% subset(time == 0) %>% # take out the one at time 0
+  gather(key = var, value, QY) #set Qy as a separate variable, and the Qy value as a different thing!
+```
+
+```{r}
+#cal phi for time 0
+
+  ## t_0 values
+  t_0 <- select(dat0, time, key, Fm, Ft) %>% subset(time == 0)
+  
+  ## add Fm_0 to df
+  dat_phi <- select(dat0, time, key, Fm, Ft) %>%
+    mutate(Fm_0 = t_0$Fm[match(key, t_0$key)]) #Fm at time 0
+  
+  ## calculate phi traits
+  psii <- as.matrix(mapply(phi_psii_calc, dat_phi$Ft, dat_phi$Fm))
+  no <- as.matrix(mapply(phi_no_calc, dat_phi$Ft, dat_phi$Fm_0))
+  npq <- as.matrix(mapply(phi_npq_calc, dat_phi$Ft, dat_phi$Fm, dat_phi$Fm_0))
+  ## reassemble df
+  df0 <- select(dat_phi, -Fm,-Ft, -Fm_0) %>% #remove Fm, Ft, Fm_0. Then start to add phi stuff in, as well as the time
+    mutate(psii = as.numeric(psii)) %>%
+    mutate(no = as.numeric(no)) %>%
+    mutate(npq = as.numeric(npq)) %>%
+    mutate(time = factor(time)) %>%
+    gather(key = var, value, psii, no, npq) %>% #var = the phi, and the value becomes value
+    rbind(dat_fvfm0) %>%
+    mutate(area_no = sapply(strsplit(key, split = '_'), FUN = function(l) l[2])) #take away anything after "_" in key if available into measure col
+
+#cal phi for time 10
+  ## t_0 values
+  t_0 <- select(dat10, time, key, Fm, Ft) %>% subset(time == 0)
+  ## add Fm_0 to df
+  dat_phi <- select(dat10, time, key, Fm, Ft) %>%
+    mutate(Fm_0 = t_0$Fm[match(key, t_0$key)]) #Fm at time 0
+  
+  ## calculate phi traits
+  psii <- as.matrix(mapply(phi_psii_calc, dat_phi$Ft, dat_phi$Fm))
+  no <- as.matrix(mapply(phi_no_calc, dat_phi$Ft, dat_phi$Fm_0))
+  npq <- as.matrix(mapply(phi_npq_calc, dat_phi$Ft, dat_phi$Fm, dat_phi$Fm_0))
+  ## reassemble df
+  df10 <- select(dat_phi, -Fm, -Ft, -Fm_0) %>% #remove Fm, Ft, Fm_0. Then start to add phi stuff in, as well as the time
+    mutate(psii = as.numeric(psii)) %>%
+    mutate(no = as.numeric(no)) %>%
+    mutate(npq = as.numeric(npq)) %>%
+    mutate(time = factor(time)) %>%
+    gather(key = var, value, psii, no, npq) %>% #var = the phi, and the value becomes value
+    rbind(dat_fvfm10) %>%
+    mutate(area_no = sapply(strsplit(key, split = '_'), FUN = function(l) l[2])) #take away anything after "_" in key if available into measure col
+
+#cal phi for time 30
+  ## t_0 values
+  t_0 <- select(dat30, time, key, Fm, Ft) %>% subset(time == 0)
+  ## add Fm_0 to df
+  dat_phi <- select(dat30, time, key, Fm, Ft) %>%
+    mutate(Fm_0 = t_0$Fm[match(key, t_0$key)]) #Fm at time 0
+  
+  ## calculate phi traits
+  psii <- as.matrix(mapply(phi_psii_calc, dat_phi$Ft, dat_phi$Fm))
+  no <- as.matrix(mapply(phi_no_calc, dat_phi$Ft, dat_phi$Fm_0))
+  npq <- as.matrix(mapply(phi_npq_calc, dat_phi$Ft, dat_phi$Fm, dat_phi$Fm_0))
+  ## reassemble df
+  df30 <- select(dat_phi, -Fm, -Ft, -Fm_0) %>% #remove Fm, Ft, Fm_0. Then start to add phi stuff in, as well as the time
+    mutate(psii = as.numeric(psii)) %>%
+    mutate(no = as.numeric(no)) %>%
+    mutate(npq = as.numeric(npq)) %>%
+    mutate(time = factor(time)) %>%
+    gather(key = var, value, psii, no, npq) %>% #var = the phi, and the value becomes value
+    rbind(dat_fvfm30) %>%
+    mutate(area_no = sapply(strsplit(key, split = '_'), FUN = function(l) l[2])) #take away anything after "_" in key if available into measure col
+
+
+#cal phi for time 60
+  ## t_0 values
+  t_0 <- select(dat60, time, key, Fm, Ft) %>% subset(time == 0)
+  ## add Fm_0 to df
+  dat_phi <- select(dat60, time, key, Fm, Ft) %>%
+    mutate(Fm_0 = t_0$Fm[match(key, t_0$key)]) #Fm at time 0
+  
+  ## calculate phi traits
+  psii <- as.matrix(mapply(phi_psii_calc, dat_phi$Ft, dat_phi$Fm))
+  no <- as.matrix(mapply(phi_no_calc, dat_phi$Ft, dat_phi$Fm_0))
+  npq <- as.matrix(mapply(phi_npq_calc, dat_phi$Ft, dat_phi$Fm, dat_phi$Fm_0))
+  ## reassemble df
+  df60 <- select(dat_phi, -Fm, -Ft, -Fm_0) %>% #remove Fm, Ft, Fm_0. Then start to add phi stuff in, as well as the time
+    mutate(psii = as.numeric(psii)) %>%
+    mutate(no = as.numeric(no)) %>%
+    mutate(npq = as.numeric(npq)) %>%
+    mutate(time = factor(time)) %>%
+    gather(key = var, value, psii, no, npq) %>% #var = the phi, and the value becomes value
+    rbind(dat_fvfm60) %>%
+    mutate(area_no = sapply(strsplit(key, split = '_'), FUN = function(l) l[2])) #take away anything after "_" in key if available into measure col
+
+#force to be numeric for area_no
+df0$area_no = as.numeric(df0$area_no)
+df10$area_no = as.numeric(df10$area_no)
+df30$area_no = as.numeric(df30$area_no)
+df60$area_no = as.numeric(df60$area_no)
+
+#extract into HL and LL dataset
+HL = as.numeric(c(1,2,6,7,9,12,14,15,16, 17, 19, 20))
+df10_HL = df10 %>% filter(area_no %in%HL)
+df10_HL$condition = "HL"
+
+df30_HL = df30 %>% filter(area_no %in%HL)
+df30_HL$condition = "HL"
+
+df60_HL = df60 %>% filter(area_no %in%HL)
+df60_HL$condition = "HL"
+
+
+LL = as.numeric(c(3,4,5,8,10,11,13,18))
+df0_LL = df0
+df0_LL$condition = "LL"
+df0_LL$treatment = ifelse(df0_LL$area_no == 1, 'control', 
+                  ifelse(df0_LL$area_no == 2, 'mock',
+                         ifelse(df0_LL$area_no == 3, 'inhibitor',
+                                ifelse(df0_LL$area_no == 4, 'mock',
+                                       ifelse(df0_LL$area_no ==5, 'control', 
+                                              ifelse(df0_LL$area_no ==6, 'mock',
+                                                     ifelse(df0_LL$area_no ==7, 'inhibitor', ifelse(df0_LL$area_no ==8, 'inhibitor', ifelse(df0_LL$area_no ==9, 'mock', ifelse(df0_LL$area_no ==10, 'control', ifelse(df0_LL$area_no ==11, 'control', 'inhibitor')))))))))))
+
+df10_LL = df10 %>% filter(area_no %in%LL)
+df10_LL$condition = "LL"
+
+df30_LL = df30 %>% filter(area_no %in%LL)
+df30_LL$condition = "LL"
+
+df60_LL = df60 %>% filter(area_no %in%LL)
+df60_LL$condition = "LL"
+
+df0_2 = df0_LL %>% mutate(batch = 2) %>% mutate(datatime = 0)
+df10_2 = rbind(df10_HL,df10_LL)
+df10_2$treatment = ifelse(df10_2$area_no == 1, 'control', ifelse(df10_2$area_no == 2, 'mock', ifelse(df10_2$area_no == 3, 'inhibitor',ifelse(df10_2$area_no == 4, 'mock', ifelse(df10_2$area_no ==5, 'mock', ifelse(df10_2$area_no ==6, 'inhibitor', ifelse(df10_2$area_no ==7, 'mock', ifelse(df10_2$area_no ==8, 'inhibitor', ifelse(df10_2$area_no ==9, 'mock', ifelse(df10_2$area_no ==10, 'inhibitor', ifelse(df10_2$area_no ==11, 'mock', ifelse(df10_2$area_no ==12, 'inhibitor', ifelse(df10_2$area_no ==13, 'inhibitor', ifelse(df10_2$area_no ==14, 'control', ifelse(df10_2$area_no ==15, 'inhibitor', ifelse(df10_2$area_no ==16, 'mock', ifelse(df10_2$area_no ==17, 'mock', ifelse(df10_2$area_no ==18, 'mock', ifelse(df10_2$area_no ==19, 'inhibitor', 'control')))))))))))))))))))
+df10_2 = mutate(df10_2, batch = 2)%>% mutate(datatime = 10)
+df10_LLcontrol = subset(df0_2, treatment == "control") %>% 
+  mutate(datatime =10)
+df10_2 = rbind(df10_2,df10_LLcontrol) #0 min LL_control is LL_control for everything
+
+df30_2 = rbind(df30_HL,df30_LL)
+df30_2$treatment = ifelse(df30_2$area_no == 1, 'control', ifelse(df30_2$area_no == 2, 'mock', ifelse(df30_2$area_no == 3, 'inhibitor', ifelse(df30_2$area_no == 4, 'mock', ifelse(df30_2$area_no ==5, 'mock', ifelse(df30_2$area_no ==6, 'inhibitor', ifelse(df30_2$area_no ==7, 'control', ifelse(df30_2$area_no ==8, 'inhibitor', ifelse(df30_2$area_no ==9, 'mock', ifelse(df30_2$area_no ==10, 'inhibitor', ifelse(df30_2$area_no ==11, 'mock', ifelse(df30_2$area_no ==12, 'inhibitor', ifelse(df30_2$area_no ==13, 'inhibitor', ifelse(df30_2$area_no ==14, 'control', ifelse(df30_2$area_no ==15, 'inhibitor', ifelse(df30_2$area_no ==16, 'mock', ifelse(df30_2$area_no ==17, 'inhibitor', ifelse(df30_2$area_no ==18, 'mock', ifelse(df30_2$area_no ==19, 'mock', 'control')))))))))))))))))))
+df30_2 = mutate(df30_2, batch = 2)%>% mutate(datatime = 30)
+df30_LLcontrol = subset(df0_2, treatment == "control") %>% 
+  mutate(datatime =30)
+df30_2 = rbind(df30_2,df30_LLcontrol)#0 min LL_control is LL_control for everything
+
+
+df60_2 = rbind(df60_HL,df60_LL)
+df60_2$treatment = ifelse(df60_2$area_no == 1, 'control', ifelse(df60_2$area_no == 2, 'mock', ifelse(df60_2$area_no == 3, 'inhibitor', ifelse(df60_2$area_no == 4, 'mock', ifelse(df60_2$area_no ==5, 'mock', ifelse(df60_2$area_no ==6, 'inhibitor', ifelse(df60_2$area_no ==7, 'control', ifelse(df60_2$area_no ==8, 'inhibitor', ifelse(df60_2$area_no ==9, 'mock', ifelse(df60_2$area_no ==10, 'inhibitor', ifelse(df60_2$area_no ==11, 'mock', ifelse(df60_2$area_no ==12, 'inhibitor', ifelse(df60_2$area_no ==13, 'inhibitor', ifelse(df60_2$area_no ==14, 'control', ifelse(df60_2$area_no ==15, 'inhibitor', ifelse(df60_2$area_no ==16, 'mock', ifelse(df60_2$area_no ==17, 'inhibitor', ifelse(df60_2$area_no ==18, 'mock', 'control'))))))))))))))))))
+df60_2 = mutate(df60_2, batch = 2)%>% mutate(datatime = 60)
+df60_LLcontrol = subset(df0_2, treatment == "control") %>% 
+  mutate(datatime =60)
+df60_2 = rbind(df60_2,df60_LLcontrol) #0 min LL_control is LL_control for everything
+
+
+#force to be factor for time and area_no
+df0_2$time = as.factor(df0_2$time)
+df0_2$datatime = as.factor(df0_2$datatime)
+df0_2$area_no = as.factor(df0_2$area_no)
+df0_2$condition = as.factor(df0_2$condition)
+df0_2$treatment = as.factor(df0_2$treatment)
+df0_2$batch = as.factor(df0_2$batch)
+
+df10_2$time = as.factor(df10_2$time)
+df10_2$datatime = as.factor(df10_2$datatime)
+df10_2$area_no = as.factor(df10_2$area_no)
+df10_2$condition = factor(df10_2$condition,levels = c("LL", "HL"))
+df10_2$treatment = as.factor(df10_2$treatment)
+df10_2$batch = as.factor(df10_2$batch)
+
+df30_2$time = as.factor(df30_2$time)
+df30_2$datatime = as.factor(df30_2$datatime)
+df30_2$area_no = as.factor(df30_2$area_no)
+df30_2$condition = factor(df30_2$condition,levels = c("LL", "HL"))
+df30_2$treatment = as.factor(df30_2$treatment)
+df30_2$batch = as.factor(df30_2$batch)
+
+df60_2$time = as.factor(df60_2$time)
+df60_2$datatime = as.factor(df60_2$datatime)
+df60_2$area_no = as.factor(df60_2$area_no)
+df60_2$condition = factor(df60_2$condition,levels = c("LL", "HL"))
+df60_2$treatment = as.factor(df60_2$treatment)
+df60_2$batch = as.factor(df60_2$batch)
+
+data2 = rbind(df0_2, df10_2, df30_2, df60_2)
+
+QY0 = subset(df0_2, var == "QY")
+QY0$datatime = 0
+QY0HL = QY0
+QY0HL$condition = "HL"
+QY0 = rbind(QY0, QY0HL)
+QY0$condition = as.character(QY0$condition)
+QY10 = subset(df10_2, var == "QY")
+QY30 = subset(df30_2, var == "QY")
+QY60 = subset(df60_2, var == "QY")
+QYdata2 = rbind(QY0, QY10, QY30, QY60)
+```
+
+
+
+##Thirdly, load and prepare the third batch in :)
+```{r}
+#load data
+a0 <- read_delim("C:/Users/HP/OneDrive - Australian National University/uni/Honours/aims/2_experiment/trayscan/20200918_totalrealinhibitor/0min_3.TXT", delim='\t', skip=2) %>%  
+  clean_names() %>% #clean space and special characters for easier data handling
+  gather(key, value, -x1, na.rm=T) %>% #change a wide dataframe to a long one
+  mutate(measure = sapply(strsplit(x1, split = '_'), FUN = function(l) l[1])) %>% #take away anything after "_" in x1 if available into measure col
+  mutate(time_key = sapply(strsplit(x1, split = '_'), FUN = function(l) l[2])) %>% #put anything after "_" in x1 into time_key
+  filter(measure %in% keep) #filter everything out except Fm, Ft and QY
+
+a10 <- read_delim("C:/Users/HP/OneDrive - Australian National University/uni/Honours/aims/2_experiment/trayscan/20200918_totalrealinhibitor/10min_3.TXT", delim='\t', skip=2) %>%  
+  clean_names() %>% #clean space and special characters for easier data handling
+  gather(key, value, -x1, na.rm=T) %>% #change a wide dataframe to a long one
+  mutate(measure = sapply(strsplit(x1, split = '_'), FUN = function(l) l[1])) %>% #take away anything after "_" in x1 if available into measure col
+  mutate(time_key = sapply(strsplit(x1, split = '_'), FUN = function(l) l[2])) %>% #put anything after "_" in x1 into time_key
+  filter(measure %in% keep) #filter everything out except Fm, Ft and QY
+
+a30 <- read_delim("C:/Users/HP/OneDrive - Australian National University/uni/Honours/aims/2_experiment/trayscan/20200918_totalrealinhibitor/30min_3.TXT", delim='\t', skip=2) %>%  
+  clean_names() %>% #clean space and special characters for easier data handling
+  gather(key, value, -x1, na.rm=T) %>% #change a wide dataframe to a long one
+  mutate(measure = sapply(strsplit(x1, split = '_'), FUN = function(l) l[1])) %>% #take away anything after "_" in x1 if available into measure col
+  mutate(time_key = sapply(strsplit(x1, split = '_'), FUN = function(l) l[2])) %>% #put anything after "_" in x1 into time_key
+  filter(measure %in% keep) #filter everything out except Fm, Ft and QY
+
+a60 <- read_delim("C:/Users/HP/OneDrive - Australian National University/uni/Honours/aims/2_experiment/trayscan/20200918_totalrealinhibitor/60min_3.TXT", delim='\t', skip=2) %>%  
+  clean_names() %>% #clean space and special characters for easier data handling
+  gather(key, value, -x1, na.rm=T) %>% #change a wide dataframe to a long one
+  mutate(measure = sapply(strsplit(x1, split = '_'), FUN = function(l) l[1])) %>% #take away anything after "_" in x1 if available into measure col
+  mutate(time_key = sapply(strsplit(x1, split = '_'), FUN = function(l) l[2])) %>% #put anything after "_" in x1 into time_key
+  filter(measure %in% keep) #filter everything out except Fm, Ft and QY
+```
+
+```{r}
+## reformat df to make re-calculation
+dat0 <- mutate(a0, time = timepoints$time[match(a0$time_key, timepoints$value)]) %>% #shove the time just created to data
+  select(x1, measure, time, key, value) %>% #select what you need in your data in the order you want
+  dcast(formula = time + key ~ measure) %>% #match the value to the correct measure (Ft, Fm qY)
+  mutate(Ft = ifelse(is.na(Ft) == T, yes = 0, no = Ft)) #ifelse return yes/no. so if Ft contain na is true, yes replace w 0. if not, left alone
+
+dat10 <- mutate(a10, time = timepoints$time[match(a10$time_key, timepoints$value)]) %>% #shove the time just created to data
+  select(x1, measure, time, key, value) %>% #select what you need in your data in the order you want
+  dcast(formula = time + key ~ measure) %>% #match the value to the correct measure (Ft, Fm qY)
+  mutate(Ft = ifelse(is.na(Ft) == T, yes = 0, no = Ft)) #ifelse return yes/no. so if Ft contain na is true, yes replace w 0. if not, left alone
+
+
+dat30 <- mutate(a30, time = timepoints$time[match(a30$time_key, timepoints$value)]) %>% #shove the time just created to data
+  select(x1, measure, time, key, value) %>% #select what you need in your data in the order you want
+  dcast(formula = time + key ~ measure) %>% #match the value to the correct measure (Ft, Fm qY)
+  mutate(Ft = ifelse(is.na(Ft) == T, yes = 0, no = Ft)) #ifelse return yes/no. so if Ft contain na is true, yes replace w 0. if not, left alone
+
+dat60 <- mutate(a60, time = timepoints$time[match(a60$time_key, timepoints$value)]) %>% #shove the time just created to data
+  select(x1, measure, time, key, value) %>% #select what you need in your data in the order you want
+  dcast(formula = time + key ~ measure) %>% #match the value to the correct measure (Ft, Fm qY)
+  mutate(Ft = ifelse(is.na(Ft) == T, yes = 0, no = Ft)) #ifelse return yes/no. so if Ft contain na is true, yes replace w 0. if not, left alone
+
+### Fv/Fm max (i.e. dark-adapted)
+###
+dat_fvfm0 <- select(dat0, time, key, QY) %>% subset(time == 0) %>% # take out the one at time 0
+  gather(key = var, value, QY) #set Qy as a separate variable, and the Qy value as a different thing!
+
+dat_fvfm10 <- select(dat10, time, key, QY) %>% subset(time == 0) %>% # take out the one at time 0
+  gather(key = var, value, QY) #set Qy as a separate variable, and the Qy value as a different thing!
+
+dat_fvfm30 <- select(dat30, time, key, QY) %>% subset(time == 0) %>% # take out the one at time 0
+  gather(key = var, value, QY) #set Qy as a separate variable, and the Qy value as a different thing!
+
+dat_fvfm60 <- select(dat60, time, key, QY) %>% subset(time == 0) %>% # take out the one at time 0
+  gather(key = var, value, QY) #set Qy as a separate variable, and the Qy value as a different thing!
+```
+
+```{r}
+#cal phi for time 0
+
+  ## t_0 values
+  t_0 <- select(dat0, time, key, Fm, Ft) %>% subset(time == 0)
+  
+  ## add Fm_0 to df
+  dat_phi <- select(dat0, time, key, Fm, Ft) %>%
+    mutate(Fm_0 = t_0$Fm[match(key, t_0$key)]) #Fm at time 0
+  
+  ## calculate phi traits
+  psii <- as.matrix(mapply(phi_psii_calc, dat_phi$Ft, dat_phi$Fm))
+  no <- as.matrix(mapply(phi_no_calc, dat_phi$Ft, dat_phi$Fm_0))
+  npq <- as.matrix(mapply(phi_npq_calc, dat_phi$Ft, dat_phi$Fm, dat_phi$Fm_0))
+  ## reassemble df
+  df0 <- select(dat_phi, -Fm,-Ft, -Fm_0) %>% #remove Fm, Ft, Fm_0. Then start to add phi stuff in, as well as the time
+    mutate(psii = as.numeric(psii)) %>%
+    mutate(no = as.numeric(no)) %>%
+    mutate(npq = as.numeric(npq)) %>%
+    mutate(time = factor(time)) %>%
+    gather(key = var, value, psii, no, npq) %>% #var = the phi, and the value becomes value
+    rbind(dat_fvfm0) %>%
+    mutate(area_no = sapply(strsplit(key, split = '_'), FUN = function(l) l[2])) #take away anything after "_" in key if available into measure col
+
+#cal phi for time 10
+  ## t_0 values
+  t_0 <- select(dat10, time, key, Fm, Ft) %>% subset(time == 0)
+  ## add Fm_0 to df
+  dat_phi <- select(dat10, time, key, Fm, Ft) %>%
+    mutate(Fm_0 = t_0$Fm[match(key, t_0$key)]) #Fm at time 0
+  
+  ## calculate phi traits
+  psii <- as.matrix(mapply(phi_psii_calc, dat_phi$Ft, dat_phi$Fm))
+  no <- as.matrix(mapply(phi_no_calc, dat_phi$Ft, dat_phi$Fm_0))
+  npq <- as.matrix(mapply(phi_npq_calc, dat_phi$Ft, dat_phi$Fm, dat_phi$Fm_0))
+
+  df10 <- select(dat_phi, -Fm, -Ft, -Fm_0) %>% #remove Fm, Ft, Fm_0. Then start to add phi stuff in, as well as the time
+    mutate(psii = as.numeric(psii)) %>%
+    mutate(no = as.numeric(no)) %>%
+    mutate(npq = as.numeric(npq)) %>%
+    mutate(time = factor(time)) %>%
+    gather(key = var, value, psii, no, npq) %>% #var = the phi, and the value becomes value
+    rbind(dat_fvfm10) %>%
+    mutate(area_no = sapply(strsplit(key, split = '_'), FUN = function(l) l[2])) #take away anything after "_" in key if available into measure col
+
+#cal phi for time 30
+  ## t_0 values
+  t_0 <- select(dat30, time, key, Fm, Ft) %>% subset(time == 0)
+  ## add Fm_0 to df
+  dat_phi <- select(dat30, time, key, Fm, Ft) %>%
+    mutate(Fm_0 = t_0$Fm[match(key, t_0$key)]) #Fm at time 0
+  
+  ## calculate phi traits
+  psii <- as.matrix(mapply(phi_psii_calc, dat_phi$Ft, dat_phi$Fm))
+  no <- as.matrix(mapply(phi_no_calc, dat_phi$Ft, dat_phi$Fm_0))
+  npq <- as.matrix(mapply(phi_npq_calc, dat_phi$Ft, dat_phi$Fm, dat_phi$Fm_0))
+
+  ## reassemble df
+  df30 <- select(dat_phi, -Fm, -Ft, -Fm_0) %>% #remove Fm, Ft, Fm_0. Then start to add phi stuff in, as well as the time
+    mutate(psii = as.numeric(psii)) %>%
+    mutate(no = as.numeric(no)) %>%
+    mutate(npq = as.numeric(npq)) %>%
+    mutate(time = factor(time)) %>%
+    gather(key = var, value, psii, no, npq) %>% #var = the phi, and the value becomes value
+    rbind(dat_fvfm30) %>%
+    mutate(area_no = sapply(strsplit(key, split = '_'), FUN = function(l) l[2])) #take away anything after "_" in key if available into measure col
+
+
+#cal phi for time 60
+  ## t_0 values
+  t_0 <- select(dat60, time, key, Fm, Ft) %>% subset(time == 0)
+  ## add Fm_0 to df
+  dat_phi <- select(dat60, time, key, Fm, Ft) %>%
+    mutate(Fm_0 = t_0$Fm[match(key, t_0$key)]) #Fm at time 0
+  
+  ## calculate phi traits
+  psii <- as.matrix(mapply(phi_psii_calc, dat_phi$Ft, dat_phi$Fm))
+  no <- as.matrix(mapply(phi_no_calc, dat_phi$Ft, dat_phi$Fm_0))
+  npq <- as.matrix(mapply(phi_npq_calc, dat_phi$Ft, dat_phi$Fm, dat_phi$Fm_0))
+  ## reassemble df
+  df60 <- select(dat_phi, -Fm, -Ft, -Fm_0) %>% #remove Fm, Ft, Fm_0. Then start to add phi stuff in, as well as the time
+    mutate(psii = as.numeric(psii)) %>%
+    mutate(no = as.numeric(no)) %>%
+    mutate(npq = as.numeric(npq)) %>%
+    mutate(time = factor(time)) %>%
+    gather(key = var, value, psii, no, npq) %>% #var = the phi, and the value becomes value
+    rbind(dat_fvfm60) %>%
+    mutate(area_no = sapply(strsplit(key, split = '_'), FUN = function(l) l[2])) #take away anything after "_" in key if available into measure col
+
+#force to be numeric for area_no
+df0$area_no = as.numeric(df0$area_no)
+df10$area_no = as.numeric(df10$area_no)
+df30$area_no = as.numeric(df30$area_no)
+df60$area_no = as.numeric(df60$area_no)
+
+#extract into HL and LL dataset
+HL = as.numeric(c(1,2,6,7,9,12,14,15,16, 17, 19, 20))
+df10_HL = df10 %>% filter(area_no %in%HL)
+df10_HL$condition = "HL"
+
+df30_HL = df30 %>% filter(area_no %in%HL)
+df30_HL$condition = "HL"
+
+df60_HL = df60 %>% filter(area_no %in%HL)
+df60_HL$condition = "HL"
+
+
+LL = as.numeric(c(3,4,5,8,10,11,13,18))
+df0_LL = df0
+df0_LL$condition = "LL"
+df0_LL$treatment = ifelse(df0_LL$area_no == 1, 'control', 
+                  ifelse(df0_LL$area_no == 2, 'inhibitor',
+                         ifelse(df0_LL$area_no == 3, 'mock',
+                                ifelse(df0_LL$area_no == 4, 'mock',
+                                       ifelse(df0_LL$area_no ==5, 'control', 
+                                              ifelse(df0_LL$area_no ==6, 'mock',
+                                                     ifelse(df0_LL$area_no ==7, 'inhibitor', ifelse(df0_LL$area_no ==8, 'inhibitor', ifelse(df0_LL$area_no ==9, 'mock', ifelse(df0_LL$area_no ==10, 'control', ifelse(df0_LL$area_no ==11, 'control', 'inhibitor')))))))))))
+
+df10_LL = df10 %>% filter(area_no %in%LL)
+df10_LL$condition = "LL"
+
+df30_LL = df30 %>% filter(area_no %in%LL)
+df30_LL$condition = "LL"
+
+df60_LL = df60 %>% filter(area_no %in%LL)
+df60_LL$condition = "LL"
+
+df0_2 = df0_LL %>% mutate(batch = 3) %>% mutate(datatime = 0)
+df10_2 = rbind(df10_HL,df10_LL)
+df10_2$treatment = ifelse(df10_2$area_no == 1, 'control', ifelse(df10_2$area_no == 2, 'mock', ifelse(df10_2$area_no == 3, 'inhibitor',ifelse(df10_2$area_no == 4, 'mock', ifelse(df10_2$area_no ==5, 'mock', ifelse(df10_2$area_no ==6, 'inhibitor', ifelse(df10_2$area_no ==7, 'control', ifelse(df10_2$area_no ==8, 'inhibitor', ifelse(df10_2$area_no ==9, 'mock', ifelse(df10_2$area_no ==10, 'inhibitor', ifelse(df10_2$area_no ==11, 'mock', ifelse(df10_2$area_no ==12, 'inhibitor', ifelse(df10_2$area_no ==13, 'inhibitor', ifelse(df10_2$area_no ==14, 'control', ifelse(df10_2$area_no ==15, 'inhibitor', ifelse(df10_2$area_no ==16, 'mock', ifelse(df10_2$area_no ==17, 'inhibitor', ifelse(df10_2$area_no ==18, 'mock', ifelse(df10_2$area_no ==19, 'mock', 'control')))))))))))))))))))
+df10_2 = mutate(df10_2, batch = 3)%>% mutate(datatime = 10)
+df10_LLcontrol = subset(df0_2, treatment == "control") %>% 
+  mutate(datatime =10)
+df10_2 = rbind(df10_2,df10_LLcontrol) #0 min LL_control is LL_control for everything
+
+df30_2 = rbind(df30_HL,df30_LL)
+df30_2$treatment = ifelse(df30_2$area_no == 1, 'control', ifelse(df30_2$area_no == 2, 'mock', ifelse(df30_2$area_no == 3, 'inhibitor', ifelse(df30_2$area_no == 4, 'mock', ifelse(df30_2$area_no ==5, 'mock', ifelse(df30_2$area_no ==6, 'inhibitor', ifelse(df30_2$area_no ==7, 'control', ifelse(df30_2$area_no ==8, 'inhibitor', ifelse(df30_2$area_no ==9, 'mock', ifelse(df30_2$area_no ==10, 'inhibitor', ifelse(df30_2$area_no ==11, 'mock', ifelse(df30_2$area_no ==12, 'inhibitor', ifelse(df30_2$area_no ==13, 'inhibitor', ifelse(df30_2$area_no ==14, 'control', ifelse(df30_2$area_no ==15, 'inhibitor', ifelse(df30_2$area_no ==16, 'mock', ifelse(df30_2$area_no ==17, 'inhibitor', ifelse(df30_2$area_no ==18, 'mock', ifelse(df30_2$area_no ==19, 'mock', 'control')))))))))))))))))))
+df30_2 = mutate(df30_2, batch = 3)%>% mutate(datatime = 30)
+df30_LLcontrol = subset(df0_2, treatment == "control") %>% 
+  mutate(datatime =30)
+df30_2 = rbind(df30_2,df30_LLcontrol) #0 min LL_control is LL_control for everything
+
+
+df60_2 = rbind(df60_HL,df60_LL)
+df60_2$treatment = ifelse(df60_2$area_no == 1, 'control', ifelse(df60_2$area_no == 2, 'mock', ifelse(df60_2$area_no == 3, 'inhibitor', ifelse(df60_2$area_no == 4, 'mock', ifelse(df60_2$area_no ==5, 'mock', ifelse(df60_2$area_no ==6, 'inhibitor', ifelse(df60_2$area_no ==7, 'control', ifelse(df60_2$area_no ==8, 'inhibitor', ifelse(df60_2$area_no ==9, 'mock', ifelse(df60_2$area_no ==10, 'inhibitor', ifelse(df60_2$area_no ==11, 'mock', ifelse(df60_2$area_no ==12, 'inhibitor', ifelse(df60_2$area_no ==13, 'inhibitor', ifelse(df60_2$area_no ==14, 'control', ifelse(df60_2$area_no ==15, 'inhibitor', ifelse(df60_2$area_no ==16, 'mock', ifelse(df60_2$area_no ==17, 'inhibitor', ifelse(df60_2$area_no ==18, 'mock',ifelse(df60_2$area_no ==19, 'mock', 'control')))))))))))))))))))
+df60_2 = mutate(df60_2, batch = 3)%>% mutate(datatime = 60)
+df60_LLcontrol = subset(df0_2, treatment == "control") %>% 
+  mutate(datatime =60)
+df60_2 = rbind(df60_2,df60_LLcontrol) #0 min LL_control is LL_control for everything
+
+
+#force to be factor for time and area_no
+df0_2$time = as.factor(df0_2$time)
+df0_2$datatime = as.factor(df0_2$datatime)
+df0_2$area_no = as.factor(df0_2$area_no)
+df0_2$condition = as.factor(df0_2$condition)
+df0_2$treatment = as.factor(df0_2$treatment)
+df0_2$batch = as.factor(df0_2$batch)
+
+df10_2$time = as.factor(df10_2$time)
+df10_2$datatime = as.factor(df10_2$datatime)
+df10_2$area_no = as.factor(df10_2$area_no)
+df10_2$condition = factor(df10_2$condition,levels = c("LL", "HL"))
+df10_2$treatment = as.factor(df10_2$treatment)
+df10_2$batch = as.factor(df10_2$batch)
+
+df30_2$time = as.factor(df30_2$time)
+df30_2$datatime = as.factor(df30_2$datatime)
+df30_2$area_no = as.factor(df30_2$area_no)
+df30_2$condition = factor(df30_2$condition,levels = c("LL", "HL"))
+df30_2$treatment = as.factor(df30_2$treatment)
+df30_2$batch = as.factor(df30_2$batch)
+
+df60_2$time = as.factor(df60_2$time)
+df60_2$datatime = as.factor(df60_2$datatime)
+df60_2$area_no = as.factor(df60_2$area_no)
+df60_2$condition = factor(df60_2$condition,levels = c("LL", "HL"))
+df60_2$treatment = as.factor(df60_2$treatment)
+df60_2$batch = as.factor(df60_2$batch)
+
+data3 = rbind(df0_2, df10_2, df30_2, df60_2)
+
+QY0 = subset(df0_2, var == "QY")
+QY0$datatime = 0
+QY0HL = QY0
+QY0HL$condition = "HL"
+QY0 = rbind(QY0, QY0HL)
+QY0$condition = as.character(QY0$condition)
+QY10 = subset(df10_2, var == "QY")
+QY30 = subset(df30_2, var == "QY")
+QY60 = subset(df60_2, var == "QY")
+QYdata3 = rbind(QY0, QY10, QY30, QY60)
+```
+
+##Analysis of all
+I need to group them together because technically they are the same thing, just reps of each other.
+
+```{r}
+alldata = rbind(data1, data2, data3)
+
+allQY = rbind(QYdata1, QYdata2, QYdata3)
+
+qll_LLcontrol = subset(allQY, treatment == "control"&condition == "LL")
+
+df0_all = subset(alldata,datatime == '0')
+df10_all = subset(alldata,datatime == '10')
+df30_all = subset(alldata, datatime == '30')
+df60_all = subset(alldata,datatime == '60')
+```
+
+Firstly, plot the data to see it!
+```{r}
+#plot0
+raw_plot0 = group_by(subset(df0_all, var != 'QY'), condition, var, time, treatment) %>%
+  ddply( .(condition, var, time, treatment),
+           summarise, val = mean(value), std = sd(value), n=sum(!is.na(value))) %>%
+  ungroup() %>%
+  mutate(var = factor(var, levels = c('npq', 'no', 'psii'))) %>%
+  mutate(time = as.numeric(paste0(time))) %>%
+  ggplot(aes(y = val, x=time, fill=condition,colour = condition, shape = treatment)) +
+  geom_line() + geom_point(size = 2) +theme_bw() + facet_wrap(~var, scales = "free") +
+  geom_vline(xintercept=600, size=0.5, alpha=.5, colour = 'black', linetype = 'longdash') +
+  geom_ribbon(aes(ymin=val-std, ymax=val+std), alpha=0.1, show.legend = F, linetype='dotted') +
+  theme(legend.position="bottom")
+raw_plot0
+#plot10 #LL has lower NPQ but higher NO. No different in PSII (not stat yet)
+raw_plot10 = group_by(subset(df10_all, var != 'QY'), condition, var, time, treatment) %>%
+  ddply( .(condition, var, time, treatment),
+           summarise, val = mean(value), std = sd(value), n=sum(!is.na(value))) %>%
+  ungroup() %>%
+  mutate(var = factor(var, levels = c('npq', 'no', 'psii'))) %>%
+  mutate(time = as.numeric(paste0(time))) %>%
+  ggplot(aes(y = val, x=time, fill=condition,colour = condition, shape = treatment)) +
+  geom_line() + geom_point(size = 2) +theme_bw() + facet_wrap(~var, scales = "free") +
+  geom_vline(xintercept=600, size=0.5, alpha=.5, colour = 'black', linetype = 'longdash') +
+  geom_ribbon(aes(ymin=val-std, ymax=val+std), alpha=0.1, show.legend = F, linetype='dotted') +
+  theme(legend.position="bottom")
+raw_plot10
+
+#plot30 #NPQ: LL increase slower, but increase higher from 200-600 sec. Same after that. With NO: increase rapidly, then lower than HL. Not much different in PSII
+raw_plot30 = group_by(subset(df30_all, var != 'QY'), condition, var, time, treatment) %>%
+  ddply( .(condition, var, time, treatment),
+           summarise, val = mean(value), std = sd(value), n=sum(!is.na(value))) %>%
+  ungroup() %>%
+  mutate(var = factor(var, levels = c('npq', 'no', 'psii'))) %>%
+  mutate(time = as.numeric(paste0(time))) %>%
+  ggplot(aes(y = val, x=time, fill=condition,colour = condition, shape = treatment)) +
+  geom_line() + geom_point(size = 2) +theme_bw() + facet_wrap(~var, scales = "free") +
+  geom_vline(xintercept=600, size=0.5, alpha=.5, colour = 'black', linetype = 'longdash') +
+  geom_ribbon(aes(ymin=val-std, ymax=val+std), alpha=0.1, show.legend = F, linetype='dotted') +
+  theme(legend.position="bottom")
+raw_plot30
+
+
+#plot60 #similar to at 30. Except PSII has LL slightly lower HL.
+raw_plot60 = group_by(subset(df60_all, var != 'QY'), condition, var, time, treatment) %>%
+  ddply( .(condition, var, time, treatment),
+           summarise, val = mean(value), std = sd(value), n=sum(!is.na(value))) %>%
+  ungroup() %>%
+  mutate(var = factor(var, levels = c('npq', 'no', 'psii'))) %>%
+  mutate(time = as.numeric(paste0(time))) %>%
+  ggplot(aes(y = val, x=time, fill=condition,colour = condition, shape = treatment)) +
+  geom_line() + geom_point(size = 2) +theme_bw() + facet_wrap(~var, scales = "free") +
+  geom_vline(xintercept=600, size=0.5, alpha=.5, colour = 'black', linetype = 'longdash') +
+  geom_ribbon(aes(ymin=val-std, ymax=val+std), alpha=0.1, show.legend = F, linetype='dotted') +
+  theme(legend.position="bottom")
+raw_plot60
+
+
+
+raw_plotQY2 = group_by(allQY, condition, datatime, treatment) %>%
+  ddply( .(condition, datatime, treatment),
+           summarise, val = mean(value), std = sd(value), n=sum(!is.na(value)), sem = std/sqrt(n)) %>%
+  ungroup() %>%
+  ggplot(aes(y = val, x=datatime, colour=condition, fill=condition, shape = treatment)) +
+  geom_line() + geom_point(size = 3) +theme_bw() +
+  #geom_vline(xintercept=451, size=0.5, alpha=.5, colour = 'black', linetype = 'longdash') +
+  geom_errorbar(aes(ymin=val-sem, ymax=val+sem, width = 0.1,show.legend = F)) +
+  theme(legend.position="bottom")
+raw_plotQY2 #this might be better_ you want to know what's going on over time, not individual ones
+```
+
+Seems to not have much differences between treatment and conditions, except LL seems to stay higher?
+Firstly, model fitting: which one is best? This is done by looking at loglikelihood. The bigger the number, the better. 
+
+
+```{r}
+#psii as test
+lmer1 <- lm(data = subset(df10_all, var == "psii"), formula = value ~ condition*time*treatment)
+plot(resid(lmer1) ~ fitted(lmer1))
+qqnorm(predict(lmer1)) #not really normal distribution
+qqline(predict(lmer1))
+summary(lmer1)
+logLik(lmer1) #3982.681 (df=121)
+
+lmer2 <- lmer(data = subset(df10_all, var == "psii"), formula = value ~ condition*time*treatment  + (1| area_no))
+plot(resid(lmer2) ~ fitted(lmer2))
+summary(lmer2)
+qqnorm(predict(lmer2))
+qqline(predict(lmer2))
+logLik(lmer2) #3465.376 (df=122)
+
+lmer3 <- lmer(data = subset(df10_all, var == "psii"), formula = value ~ condition*time*treatment  + (1| batch))
+plot(resid(lmer3) ~ fitted(lmer3))
+summary(lmer3)
+qqnorm(predict(lmer3))
+qqline(predict(lmer3))
+logLik(lmer3) #3508.247 (df=122)
+```
+Though log lik when batch is included, I think I do need to include batch effect. This is because there are likely to have batch effect as plants might have different growth condition and have different physiological growth (plants do look different in each batch). 
+
+The first thing is to do the analysis per timepoint. then I can extract them and do per parameter (cause in case I want to group HL and LL, it is easier.)
+```{r}
+
+## for each measure, subset model and estimate marginal means
+## do stat for delta different
+outQYdata = NULL
+allQY$datatime = as.factor(allQY$datatime)
+mdl <- lmer(data = allQY, formula = value ~ condition*datatime*treatment  + (1| batch)) #want to see a trend more than what's going on at each timepoint
+#plot(mdl)
+print(rsquared(mdl))
+emm = emmeans(mdl,specs = c('treatment', 'condition'), by = "datatime")
+sumemm = summary(emm) %>% na.omit() 
+
+compseachtime = summary(pairs(emm), by = NULL, adjust = 'fdr') %>% na.omit()
+comp2eachtime = compseachtime %>%subset(p.value <0.05)
+d3 <- comp2eachtime %>%
+  separate(contrast, c("compare_w", "compare_to"), " - ") %>%
+  separate(compare_w, c("compare_w_condition", "compare_w_treatment"), " ") %>%
+  separate(compare_to, c("compare_to_condition", "compare_to_treatment"), " ") %>% 
+  mutate(contrast = comp2eachtime$contrast) %>%
+  subset(compare_w_condition == compare_to_condition | compare_w_treatment == compare_to_treatment) 
+df = tbl_df(sumemm) %>% 
+  na.omit() #%>% 
+  #mutate(fdr = compseachtime$p.value)
+
+outQYdata = list(df, comp2eachtime, d3)
+```
+
+```{r}
+QY_dataoutplot = outQYdata[[1]]
+QYdataplot = ggplot(subset(QY_dataoutplot, treatment != "inhibitor"), aes(y = emmean, x=datatime, colour=condition, fill=condition, shape = treatment)) +
+  geom_point(size = 3) +theme_bw() + #geom_line() +
+  geom_errorbar(aes(ymin=(emmean-SE), ymax=(emmean+SE)), width =0.05, show.legend = F) +
+  #geom_text(col='black',aes(y=min(emmean)*1.3,x=datatime, label ='')) +
+  theme(legend.position="right", axis.text = element_text(size = 14), 
+        axis.title = element_text(size = 16),
+        legend.title = element_blank(), legend.text = element_text(size = 14)) +
+  xlab("Time (minutes)") +
+  scale_y_continuous(name = "Fv/Fm")
+QYdataplot
+
+QY_dataoutplot = outQYdata[[1]]
+QY_dataoutplot2 = subset(QY_dataoutplot, datatime != "0" | condition != "HL")
+QYdataplot1 = ggplot(subset(QY_dataoutplot2, treatment != c("control")), aes(y = emmean, x=datatime, colour=condition, fill=condition, shape = treatment)) +
+  geom_point(size = 3, position = position_jitter(w = 0.002, h = 0.002)) +theme_bw() + #geom_line() +
+  scale_shape_manual(values = c(15,17))+
+  geom_errorbar(aes(ymin=(emmean-SE), ymax=(emmean+SE)), width =0.05, show.legend = F) +
+  #geom_text(col='black',aes(y=min(emmean)*1.3,x=datatime, label ='')) +
+  theme(legend.position="right", axis.text = element_text(size = 14), 
+        axis.title = element_text(size = 16),
+        legend.title = element_blank(), legend.text = element_text(size = 14)) +
+  xlab("Time (minutes)") +
+  scale_y_continuous(name = "Fv/Fm")
+
+
+QYdataplot1
+
+```
+
+```{r}
+##0min nothing diff
+out1 <- NULL
+out2 <- NULL
+out3 <-NULL
+out4 <- NULL
+par(mfrow=c(2,2))
+for(i in unique(subset(df0_all, var != "QY")$var)){
+  mdl <- lmer(data = subset(df0_all, var == i), formula = value ~ time*treatment  + (1| batch)) #only LL here :)
+  plot(resid(mdl) ~ fitted(mdl))
+  print(rsquared(mdl))
+
+  emm <- emmeans(mdl, specs = c('treatment'), by = 'time')
+  comps <- summary(pairs(emm), by=NULL, adjust = 'fdr')
+  
+  d1 <- comps %>%
+    mutate(time = as.numeric(paste0(time))) %>%
+    #mutate(fdr = comps$p.value[match(time,comps$time)]) %>%
+    mutate(var = i) %>%
+    mutate(datatime = "0") %>%
+    subset(p.value <0.05)
+  
+  d2 <- tbl_df(summary(emm)) %>%
+    mutate(time = as.numeric(paste0(time))) %>%
+    mutate(var = i)%>%
+    mutate(datatime = "0")
+  
+  out1 <- rbind(d1,out1)
+  out2 <- rbind(d2,out2)
+}
+
+out2$var = as.factor(out2$var)
+par(mfrow=c(1,1))
+out0 = list(out2, out1)
+
+#10min_probably don't need this anymore_but keep 
+#separate Qy from everything else cause it only has 1 timepoint
+#fit the model the same way
+str(df10_2)
+
+#do the same for the rest
+out1 <- NULL
+out2 <- NULL
+out3 <-NULL
+out4 <- NULL
+par(mfrow=c(2,2))
+for(i in unique(subset(df10_all, var != "QY")$var)){
+  mdl <- lmer(data = subset(df10_all, var == i), formula = value ~ condition*time*treatment  + (1| batch))
+  plot(resid(mdl) ~ fitted(mdl))
+  print(rsquared(mdl))
+
+  emm <- emmeans(mdl, specs = c('condition', 'treatment'), by = 'time')
+  comps <- summary(pairs(emm), by=NULL, adjust = 'fdr')
+  
+  d1 <- comps %>%
+    mutate(time = as.numeric(paste0(time))) %>%
+    #mutate(fdr = comps$p.value[match(time,comps$time)]) %>%
+    mutate(var = i)%>%
+    mutate(datatime = "10")
+  
+  d2 <- tbl_df(summary(emm)) %>%
+    mutate(time = as.numeric(paste0(time))) %>%
+    mutate(var = i)%>%
+    mutate(datatime = "10")
+
+    d3 <- d1 %>%
+  separate(contrast, c("compare_w", "compare_to"), " - ") %>%
+  separate(compare_w, c("compare_w_condition", "compare_w_treatment"), " ") %>%
+  separate(compare_to, c("compare_to_condition", "compare_to_treatment"), " ") %>% 
+  mutate(contrast = d1$contrast) %>%
+  subset(compare_w_condition == compare_to_condition | compare_w_treatment == compare_to_treatment) %>%
+  subset(p.value <0.05)
+        d4 <- d1 %>%
+  separate(contrast, c("compare_w", "compare_to"), " - ") %>%
+  separate(compare_w, c("compare_w_condition", "compare_w_treatment"), " ") %>%
+  separate(compare_to, c("compare_to_condition", "compare_to_treatment"), " ") %>% 
+  mutate(contrast = d1$contrast) %>%
+  subset(p.value <0.05)
+  
+  out1 <- rbind(d1,out1)
+  out2 <- rbind(d2,out2)
+  out3 <- rbind(d3, out3)
+  out4 <- rbind(d4, out4)
+}
+
+out2$var = as.factor(out2$var)
+par(mfrow=c(1,1))
+out10 = list(out2, out1, out4, out3)
+
+
+#30min
+#do the same for the rest
+out1 <- NULL
+out2 <- NULL
+out3 <- NULL
+out4 <- NULL
+par(mfrow=c(2,2))
+for(i in unique(subset(df30_all, var != "QY")$var)){
+  mdl <- lmer(data = subset(df30_all, var == i), formula = value ~ condition*time*treatment  + (1| batch))
+  plot(resid(mdl) ~ fitted(mdl))
+  print(rsquared(mdl))
+
+  emm <- emmeans(mdl, specs = c('condition', 'treatment'), by = 'time')
+  comps <- summary(pairs(emm), by=NULL, adjust = 'fdr')
+  
+  d1 <- comps %>%
+    mutate(time = as.numeric(paste0(time))) %>%
+    #mutate(fdr = comps$p.value[match(time,comps$time)]) %>%
+    mutate(var = i)%>%
+    mutate(datatime = "30")
+  
+  d2 <- tbl_df(summary(emm)) %>%
+    mutate(time = as.numeric(paste0(time))) %>%
+    mutate(var = i)%>%
+    mutate(datatime = "30")
+
+    d3 <- d1 %>%
+  separate(contrast, c("compare_w", "compare_to"), " - ") %>%
+  separate(compare_w, c("compare_w_condition", "compare_w_treatment"), " ") %>%
+  separate(compare_to, c("compare_to_condition", "compare_to_treatment"), " ") %>% 
+  mutate(contrast = d1$contrast) %>%
+  subset(compare_w_condition == compare_to_condition | compare_w_treatment == compare_to_treatment) %>%
+  subset(p.value <0.05)
+    d4 <- d1 %>%
+  separate(contrast, c("compare_w", "compare_to"), " - ") %>%
+  separate(compare_w, c("compare_w_condition", "compare_w_treatment"), " ") %>%
+  separate(compare_to, c("compare_to_condition", "compare_to_treatment"), " ") %>% 
+  mutate(contrast = d1$contrast) %>%
+  subset(p.value <0.05)
+  
+  out1 <- rbind(d1,out1)
+  out2 <- rbind(d2,out2)
+  out3 <- rbind(d3, out3)
+  out4 <- rbind(d4, out4)
+  
+}
+
+out2$var = as.factor(out2$var)
+par(mfrow=c(1,1))
+out30 = list(out2, out1, out4, out3)
+
+#60min
+#fit the model the same way
+#do the same for the rest
+out1 <- NULL
+out2 <- NULL
+out3 <-NULL
+out4 <- NULL
+par(mfrow=c(2,2))
+for(i in unique(subset(df60_all, var != "QY")$var)){
+  mdl <- lmer(data = subset(df60_all, var == i), formula = value ~ condition*time*treatment  + (1| batch))
+  plot(resid(mdl) ~ fitted(mdl))
+  print(rsquared(mdl))
+
+  emm <- emmeans(mdl, specs = c('condition', 'treatment'), by = 'time')
+  comps <- summary(pairs(emm), by=NULL, adjust = 'fdr')
+  
+  d1 <- comps %>%
+    mutate(time = as.numeric(paste0(time))) %>%
+    #mutate(fdr = comps$p.value[match(time,comps$time)]) %>%
+    mutate(var = i)%>%
+    mutate(datatime = "60")
+  
+  d2 <- tbl_df(summary(emm)) %>%
+    mutate(time = as.numeric(paste0(time))) %>%
+    mutate(var = i)%>%
+    mutate(datatime = "60")
+
+    d3 <- d1 %>%
+  separate(contrast, c("compare_w", "compare_to"), " - ") %>%
+  separate(compare_w, c("compare_w_condition", "compare_w_treatment"), " ") %>%
+  separate(compare_to, c("compare_to_condition", "compare_to_treatment"), " ") %>% 
+  mutate(contrast = d1$contrast) %>%
+  subset(compare_w_condition == compare_to_condition | compare_w_treatment == compare_to_treatment) %>%
+  subset(p.value <0.05)
+    
+    d4 <- d1 %>%
+  separate(contrast, c("compare_w", "compare_to"), " - ") %>%
+  separate(compare_w, c("compare_w_condition", "compare_w_treatment"), " ") %>%
+  separate(compare_to, c("compare_to_condition", "compare_to_treatment"), " ") %>% 
+  mutate(contrast = d1$contrast) %>%
+  subset(p.value <0.05)
+  
+  out1 <- rbind(d1,out1)
+  out2 <- rbind(d2,out2)
+  out3 <- rbind(d3, out3)
+  out4 <- rbind(d4, out4)
+  
+}
+out2$var = as.factor(out2$var)
+par(mfrow=c(1,1))
+out60 = list(out2, out1, out3, out4)
+```
+
+```{r}
+out0dataLL = out0[[1]] %>% mutate(condition = "LL")
+outNPQ = NULL
+outNPQ = subset(out0[[1]], var == "npq") %>%
+  mutate(condition = "HL") %>%
+  rbind(subset(out0dataLL, var == "npq")) %>%
+  rbind(subset(out10[[1]], var == "npq")) %>%
+  rbind(subset(out30[[1]], var == "npq")) %>%
+  rbind(subset(out60[[1]], var == "npq"))
+
+outNO = NULL
+outNO = subset(out0[[1]], var == "no") %>%
+  mutate(condition = "HL") %>%
+  rbind(subset(out0dataLL, var == "no")) %>%
+  rbind(subset(out10[[1]], var == "no")) %>%
+  rbind(subset(out30[[1]], var == "no")) %>%
+  rbind(subset(out60[[1]], var == "no"))
+
+outPSII = NULL
+outPSII = subset(out0[[1]], var == "psii") %>%
+  mutate(condition = "HL") %>%
+  rbind(subset(out0dataLL, var == "psii")) %>%
+  rbind(subset(out10[[1]], var == "psii")) %>%
+  rbind(subset(out30[[1]], var == "psii")) %>%
+  rbind(subset(out60[[1]], var == "psii"))
+var_lab = c("ϕNO", "ϕNPQ", "ϕPSII")
+datatime_lab = c("0 min", "10 min", "30 min", "60 min")
+allout = rbind(outPSII, outNPQ, outNO)
+alloutplot = ggplot(subset(allout, treatment != "control"), aes(y = emmean, x=time, colour=condition, fill= condition, shape = treatment)) +
+  geom_line() +
+  geom_point(size = 2) +
+  theme_bw() + facet_grid(var ~ datatime, switch = "y", labeller = labeller(datatime = datatime_lab , var = var_lab)) +
+  geom_vline(xintercept=600, size=0.5, alpha=.5, colour = 'black', linetype = 'longdash') +
+  geom_ribbon(aes(ymin=(emmean-SE), ymax=(emmean+SE)), alpha=0.1, show.legend = F, linetype='dotted') +
+  geom_text(col='black',aes(y=max(emmean)*1,x=time, label = '')) +
+  theme(legend.position="right", axis.text = element_text(size = 14), 
+        axis.title = element_text(size = 16),
+        legend.title = element_blank(), legend.text = element_text(size = 14), axis.text.x = element_text(angle = 90),
+            aspect.ratio = 1,
+    strip.background = element_blank(),
+    strip.placement = "outside",
+    strip.text.x = element_text(size = 18),
+    strip.text.y = element_text(size = 18)) +
+  scale_shape_manual(values = c(15,17))+
+  labs(x = "Time (seconds)")+ 
+  #opts(axis.text.x=theme_text(angle=-45))
+  scale_y_continuous(breaks = seq(0, 1.0, 0.5))+
+  scale_x_continuous(breaks = seq(0,800,200))
+alloutplot
+```
