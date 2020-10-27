@@ -1,0 +1,149 @@
+---
+title: "Summary of everything_mycluster"
+author: "Hanh"
+date: "6/7/2020"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(rmarkdown)
+library(tidyverse)
+library(cluster)
+library(factoextra)
+library(readxl)
+library(NbClust)
+library(fpc)
+library(clusterCrit)
+library(dbscan)
+library(mclust) #for model-based clustering
+library(clustertend) #check cluster tendency
+```
+
+
+```{r}
+#load the data
+mydata <- read.csv("C:/Users/HP/Desktop/TLE.csv")
+
+ggplot(data = mydata, mapping =aes(x = TotalFC, y = RiboFC))+
+  geom_point()+
+  labs(y = "ribosomal mRNA (Fold change)",
+       x = "total mRNA (Fold change)")
+
+mydata2 = mydata
+mydata2$logtotalFC = log2(mydata2$TotalFC)
+mydata2$logriboFC = log2(mydata2$RiboFC)
+ggplot(data = mydata2, mapping =aes(x = logtotalFC, y = logriboFC))+
+  geom_point()+
+  labs(y = "ribosomal mRNA (Fold change)",
+       x = "total mRNA (Fold change)")
+
+#filter for differentially expressed genes (DEGs)
+mydata1 =  filter(mydata, Total_PValue < 0.05 |Ribo_PValue < 0.05)
+#filter out RPKM < 1
+mydata2 = filter(mydata1, (LL_Total_RPKM > 1 & HL_Total_RPKM > 1) & (LL_Ribo_RPKM > 1 & HL_Ribo_RPKM > 1))
+#scale the scale so I can see the clusters easier
+ggplot(data = mydata2, mapping =aes(x = TotalFC, y = RiboFC))+
+  geom_point()+
+  labs(y = "ribosomal mRNA (Fold change)",
+       x = "total mRNA (Fold change)")
+#create dataset to work with
+
+mydata3 = mydata2
+
+#create log10FC
+mydata3$logtotalFC = log2(mydata3$TotalFC)
+mydata3$logriboFC = log2(mydata3$RiboFC)
+log10FC = mydata3[,21:22]
+log10FC$ID = mydata3$ID
+
+ggplot(data = log10FC, mapping =aes(x = logtotalFC, y = logriboFC))+
+  geom_point()+
+  labs(x = "Log2 total mRNA (Fold change)", y = "Log2 polysome mRNA (Fold change)") +
+  theme(legend.position="right", axis.text = element_text(size = 14), 
+        axis.title = element_text(size = 16),
+        legend.title = element_blank(), legend.text = element_text(size = 14))
+```
+
+Is there any true clusters?
+
+```{r}
+fviz_pca(prcomp(log10FC[,c(1,2)]), geom = "point")+
+  xlab("PC1 (86%)") + ylab("PC2 (14%)")
+```
+a. Kmeans clustering
+```{r}
+#k-means clustering_2 clusters
+set.seed(4) #ensure all clustering algorithm starts at the same point, avoid randomness between different clusters which could potentially cause biases
+clusters = kmeans(log10FC[,1:2], 5)
+log10FC$clusters2 = as.factor(clusters$cluster)
+str(clusters)
+mapcluster = plot(log10FC[,1:2])
+ggplot(mapcluster) + geom_point(aes(x = logtotalFC, y = logriboFC, colour = as.factor(clusters2)), data = log10FC) +
+  labs(x = "Log2 total mRNA (Fold change)", y = "Log2 polysome mRNA (Fold change)") +
+  theme(legend.position="right", axis.text = element_text(size = 14), 
+        axis.title = element_text(size = 16),
+        legend.title = element_blank(), legend.text = element_text(size = 14))
+
+#log10FC_2 clusters internal validation
+km.res = eclust(log10FC[,1:2], "kmeans", k = 5, graph = FALSE) #false because we already did it
+km_stats = cluster.stats(dist(log10FC[,1:2]), km.res$cluster)
+km_stats$dunn
+# CBDW
+cdbw(log10FC[,1:2], as.integer(log10FC$clusters2))
+```
+
+b. DBScan
+```{r}
+#determining eps
+kNNdistplot(log10FC[,1:2], k = 5)
+#a line is added to assist with knowing where the sharpest turn is
+abline(h = 0.4, lty = 2) #eps is around 0.4
+
+#DBscan
+db_log10 <- fpc::dbscan(log10FC[,1:2], eps = 0.4, method = "raw", scale = FALSE)
+ggplot(data = log10FC[,1:2], mapping =aes(x = logtotalFC, y = logriboFC))+
+  geom_point() #raw graph
+log10FC$clusters2 = db_log10$cluster
+ggplot(data = log10FC, mapping =aes(x = logtotalFC, y = logriboFC, colour = as.factor(clusters2)))+
+  geom_point() + labs(x = "Total mRNA (Fold change)", y = "Polysome mRNA (Fold change)") +
+  theme(legend.position="right", axis.text = element_text(size = 14), 
+        axis.title = element_text(size = 16),
+        legend.title = element_blank(), legend.text = element_text(size = 14))
+  
+# CBDW
+cdbw(log10FC[,1:2], as.integer(log10FC$clusters2))
+ 
+```
+
+c. Model-based
+
+```{r}
+#know the optimal selected model
+mb_log10 = Mclust(log10FC[,1:2])
+clus_BIC_log10 = mclustBIC(log10FC[,1:2])
+summary(clus_BIC_log10) #top 3 model and number of cluster
+mb_log10$modelName #best model
+
+log10FC$mb = as.integer(mb_log10$classification)
+ggplot(data = log10FC, mapping =aes(x = logtotalFC, y = logriboFC, colour = as.factor(mb)))+
+  geom_point() + labs(x = "Total mRNA (Fold change)", y = "Polysome mRNA (Fold change)") +
+  theme(legend.position="right", axis.text = element_text(size = 14), 
+        axis.title = element_text(size = 16),
+        legend.title = element_blank(), legend.text = element_text(size = 14))
+
+fviz_mclust(mb_log10, what = c("classification"), geom = "point", #use model-based, type of graph = scatter plot
+            pointsize = 1.5, #how big the dot is
+            main = "Cluster using model-based clustering",
+            xlab = "total mRNA (Fold change)",
+            ylab = "ribosomal mRNA (Fold change)")
+
+#Validation
+log10FC$mb = as.integer(mb_log10$classification)
+cdbw(log10FC[,1:2], log10FC$mb)
+```
+
